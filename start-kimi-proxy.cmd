@@ -1,0 +1,3 @@
+@echo off
+echo Starting Kimi Proxy on port 8787...
+node "%USERPROFILE%\.local\bin\kimi-proxy.js"
