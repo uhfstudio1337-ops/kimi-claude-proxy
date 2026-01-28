@@ -164,11 +164,42 @@ sk-IveN1uypGMTqTnjkCIBOv64c1kN1JSMprZ7EYVbCi9I1H4RA
 
 ---
 
-## Troubleshooting
+## Известные ограничения
 
-### WebSearch не работает
-- Прокси автоматически добавляет `$web_search` builtin_function
-- Перезапусти прокси после обновления
+### WebSearch НЕ РАБОТАЕТ
+
+**Проблема:** WebSearch в Claude Code — это `server_tool_use`, специальная фича где сервер Anthropic сам выполняет поиск. CLI ожидает `server_tool_use.web_search_requests` в ответе API.
+
+Kimi `$web_search` работает иначе — через tool_calls. Это разные механизмы, которые нельзя полностью эмулировать через прокси.
+
+**Решения:**
+
+1. **WebFetch работает!** Используй для конкретных URL:
+   ```
+   Скачай https://reuters.com и расскажи новости
+   ```
+
+2. **MCP сервер для поиска** — добавить Tavily или Brave Search:
+   ```json
+   {
+     "mcpServers": {
+       "tavily": {
+         "command": "npx",
+         "args": ["-y", "tavily-mcp"],
+         "env": { "TAVILY_API_KEY": "tvly-xxx" }
+       }
+     }
+   }
+   ```
+
+3. **Kimi CLI** — использовать родной CLI от Moonshot:
+   ```
+   npm install -g @anthropic-ai/kimi-cli
+   ```
+
+---
+
+## Troubleshooting
 
 ### WebFetch: "Unable to verify domain"
 - `domain_info` endpoint замокан в прокси
@@ -196,4 +227,4 @@ sk-IveN1uypGMTqTnjkCIBOv64c1kN1JSMprZ7EYVbCi9I1H4RA
 
 ---
 
-*Документ: v3.1 | 28.01.2026*
+*Документ: v3.2 | 28.01.2026*
