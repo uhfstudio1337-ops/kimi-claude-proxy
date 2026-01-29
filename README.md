@@ -1,4 +1,4 @@
-# Claude Code + Kimi K2.5: Полный гайд (v3.4)
+# Claude Code Smart Proxy: Полный гайд (v4.0)
 
 Настроено: 29.01.2026
 
@@ -6,26 +6,29 @@
 
 ## Что это
 
-**Kimi K2.5** — китайская модель от Moonshot AI, работающая через Claude Code CLI.
+**Smart Proxy v3.0** — локальный прокси-сервер, который позволяет использовать Claude Code CLI в двух режимах через один пропатченный cli.js:
 
-| Параметр | Claude Opus 4.5 | Kimi K2.5 |
-|----------|-----------------|-----------|
-| Контекст | 200K | **256K** |
-| Цена | ~$100/5ч | **~$15/5ч** |
-| Качество | Топ | На уровне Opus |
-| Tools | Да | Да + $web_search |
+| Режим | Команда | API | Цена |
+|-------|---------|-----|------|
+| **Claude Max** | `claude-pro` | Anthropic (подписка) | По подписке |
+| **Kimi K2.5** | `claude-kimi` | Moonshot AI | ~$15/5ч |
+
+Телеметрия вырезана в обоих режимах.
 
 ---
 
 ## Архитектура
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  Claude Code    │────▶│  Kimi Proxy     │────▶│  Kimi K2.5 API  │
-│  CLI (патченый) │     │  localhost:8787 │     │  api.moonshot.ai│
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-     Anthropic              Конвертер              OpenAI
-     формат                 форматов               формат
+                         ┌──────────────────────┐
+claude-pro  ────────────▶│                      │────▶ api.anthropic.com
+(подписка Max/Pro)       │   Smart Proxy :8787  │     (прозрачный проброс)
+                         │                      │
+claude-kimi ────────────▶│   Роутинг по ключу:  │────▶ api.moonshot.ai
+(API_KEY=sk-kimi-proxy)  │   sk-kimi-proxy→Kimi │     (конвертация формата)
+                         │   иначе → Anthropic  │
+                         └──────────────────────┘
+                          Телеметрия: убита в cli.js
 ```
 
 ---
@@ -36,14 +39,11 @@
 ```cmd
 start-kimi-proxy
 ```
-или
-```cmd
-node %USERPROFILE%\.local\bin\kimi-proxy.js
-```
 
-### 2. Запуск Claude Code (Терминал 2)
+### 2. Запуск Claude (Терминал 2)
 ```cmd
-claude-kimi
+claude-pro       REM Claude Max по подписке (без телеметрии)
+claude-kimi      REM Kimi K2.5 (дешёвый)
 ```
 
 ### 3. Проверка
@@ -57,51 +57,59 @@ curl http://localhost:8787/health
 
 | Файл | Назначение |
 |------|------------|
-| `%USERPROFILE%\.local\bin\kimi-proxy.js` | Прокси сервер |
-| `%USERPROFILE%\.local\bin\patch-claude-full.js` | Патч cli.js |
+| `%USERPROFILE%\.local\bin\kimi-proxy.js` | Smart Proxy v3.0 (dual mode) |
+| `%USERPROFILE%\.local\bin\patch-claude-full.js` | Патч cli.js (телеметрия + redirect) |
 | `%USERPROFILE%\.local\bin\start-kimi-proxy.cmd` | Запуск прокси |
-| `%USERPROFILE%\.local\bin\claude-kimi.cmd` | Запуск Claude+Kimi |
-| `%USERPROFILE%\.local\bin\find-urls.js` | Сканер URL |
+| `%USERPROFILE%\.local\bin\claude-pro.cmd` | Claude Max по подписке |
+| `%USERPROFILE%\.local\bin\claude-kimi.cmd` | Claude через Kimi K2.5 |
+| `%USERPROFILE%\.local\bin\find-urls.js` | Сканер URL в cli.js |
 | `%USERPROFILE%\.claude\commands\kimi.md` | Skill /kimi |
-| Tavily MCP | Веб-поиск (замена WebSearch) |
+| Tavily MCP | Веб-поиск (замена WebSearch, для Kimi) |
+
+---
+
+## Как работает роутинг
+
+Прокси определяет режим по заголовку `x-api-key`:
+
+| Заголовок | Режим | Действие |
+|-----------|-------|----------|
+| `x-api-key: sk-kimi-proxy` | Kimi | Конвертация Anthropic→OpenAI, отправка в Moonshot |
+| Любой другой / OAuth | Anthropic | Прозрачный проброс на api.anthropic.com |
+
+Маршрутизация Anthropic-режима по URL path:
+
+| Path | Целевой хост |
+|------|-------------|
+| `/v1/messages`, `/v1/*` | `api.anthropic.com` |
+| `/oauth/*`, `/v1/oauth/*` | `platform.claude.com` |
+| `/api/*` | `claude.ai` |
 
 ---
 
 ## Kimi K2.5 API Features
 
-### Builtin Functions (server-side автоматические)
+### Builtin Functions (server-side)
 
-| Функция | Описание | Формат |
-|---------|----------|--------|
-| `$web_search` | Веб-поиск | `{"type": "builtin_function", "function": {"name": "$web_search"}}` |
-| `$code_interpreter` | Выполнение кода | В разработке |
-| `$file_read` | Чтение файлов | Через File API |
+| Функция | Описание |
+|---------|----------|
+| `$web_search` | Веб-поиск (автоматический) |
+| `$code_interpreter` | Выполнение кода (в разработке) |
+| `$file_read` | Чтение файлов через File API |
 
 ### Capabilities
 
 - **256K контекст** — в 2 раза больше Claude
 - **Tool Calling** — OpenAI/Anthropic совместимый формат
-- **Vision** — понимание изображений, UI→код
-- **File Upload** — PDF, DOCX, images (до 1000 файлов)
-- **Context Caching** — кэширование для повторных запросов
-- **Agent Swarm** — до 100 параллельных суб-агентов, 1500 tool calls
+- **Vision** — понимание изображений
+- **Agent Swarm** — до 100 параллельных суб-агентов
 
-### Modes
-
-| Режим | Temperature | Описание |
-|-------|-------------|----------|
-| Thinking | 1.0 | С reasoning traces |
-| Instant | 0.6 | Быстрые ответы |
-
----
-
-## Модели
+### Модели
 
 | Модель | Описание | Цена |
 |--------|----------|------|
-| `kimi-k2.5` | Топовая, мультимодальная, agentic | ~0.002¥/1K |
+| `kimi-k2.5` | Топовая, мультимодальная | ~0.002¥/1K |
 | `kimi-k2-0905` | Улучшенный K2 | ~0.001¥/1K |
-| `kimi-k2-0711-preview` | Preview, подтверждённо работает web_search | ~0.001¥/1K |
 
 Смена модели — в `kimi-proxy.js` → `MODEL_MAP`.
 
@@ -109,43 +117,30 @@ curl http://localhost:8787/health
 
 ## Патч cli.js
 
-### Что заблокировано (206 URL)
+### Что делает патч (239 изменений)
 
-| Сервис | Статус |
-|--------|--------|
-| api.anthropic.com | → proxy |
-| api-staging.anthropic.com | → dead |
-| sentry.io | → dead |
-| statsig.anthropic.com | → dead |
-| api.segment.io | → dead |
-| datadoghq.com | → dead |
-| growthbook.io | → dead |
-| mcp-proxy.anthropic.com | → dead |
-| claude.ai/* | → dead/proxy |
-| code.claude.com/* | → dead |
-| platform.claude.com/* | → dead |
-| storage.googleapis.com/claude-code-dist | → dead |
+| Категория | Замен | Результат |
+|-----------|-------|-----------|
+| API endpoints → proxy | 17 | Все запросы идут через localhost:8787 |
+| OAuth → proxy | 6 | Авторизация через прокси |
+| Телеметрия → dead | 12 | Sentry, Statsig, Segment, Datadog, GrowthBook |
+| Автообновления → dead | 4 | CLI не обновляется |
+| Sentry capture → no-op | 3 | Error reporting отключён |
+| logEvent/track → safe | 7 | Трекинг отключён |
+| Домены Anthropic → dead | 14 | Сайты заблокированы |
+| Ссылки Claude → dead | 162 | UI/документация заблокированы |
+| **Итого** | **239** | **Полная изоляция** |
 
-### Применение патча
+Подробности: см. `CLI_PATCH_DETAILS.md`
 
-```cmd
-node %USERPROFILE%\.local\bin\patch-claude-full.js
-```
+### Защита от слёта патча (4 уровня)
 
-### Защита от слёта патча (3 уровня)
-
-| Уровень | Механизм | Что делает |
-|---------|----------|------------|
-| 1 | `autoUpdates: false` в `.claude.json` | CLI не проверяет обновления |
-| 2 | `attrib +R` на cli.js | Файл нельзя перезаписать |
-| 3 | Автопатч в `claude-kimi.cmd` | Если слетело — патчит при запуске |
-
-**Фиксация версии:**
-```cmd
-npm install -g @anthropic-ai/claude-code@2.1.23
-```
-
-Если патч всё-таки слетел — просто запусти `claude-kimi` и он пропатчит автоматически.
+| Уровень | Механизм | Описание |
+|---------|----------|----------|
+| 1 | `autoUpdates: false` | CLI не проверяет обновления |
+| 2 | `attrib +R` на cli.js | Файл read-only |
+| 3 | Автопатч в `claude-pro.cmd` / `claude-kimi.cmd` | При запуске проверяет и патчит |
+| 4 | Фиксация версии npm | `npm install -g @anthropic-ai/claude-code@2.1.23` |
 
 ---
 
@@ -163,111 +158,55 @@ sk-IveN1uypGMTqTnjkCIBOv64c1kN1JSMprZ7EYVbCi9I1H4RA
 
 ---
 
-## Skill /kimi
+## Tavily MCP (веб-поиск для Kimi)
 
-Используй в Claude Code:
-```
-/kimi status    — проверить прокси
-/kimi start     — инструкция запуска
-/kimi config    — показать конфигурацию
-/kimi models    — список моделей
-/kimi help      — справка по API
-```
-
----
-
-## Известные ограничения
-
-### WebSearch НЕ РАБОТАЕТ
-
-**Проблема:** WebSearch в Claude Code — это `server_tool_use`, специальная фича где сервер Anthropic сам выполняет поиск. CLI ожидает `server_tool_use.web_search_requests` в ответе API.
-
-Kimi `$web_search` работает иначе — через tool_calls. Это разные механизмы, которые нельзя полностью эмулировать через прокси.
-
-**Решение: Tavily MCP (РАБОТАЕТ!)**
-
-Tavily MCP полностью заменяет WebSearch. 1000 запросов/мес бесплатно.
+WebSearch в Claude Code — `server_tool_use` (Anthropic server-side). Не работает через Kimi.
+Замена: **Tavily MCP** — 1000 запросов/мес бесплатно.
 
 ### Установка
-
-```bash
-npm install -g tavily-mcp@latest
-```
-
-### Регистрация
-
-1. Зарегайся на https://tavily.com/
-2. Получи API ключ (формат `tvly-xxx`)
-
-### Добавление в Claude Code
-
 ```bash
 claude mcp add tavily-search -- npx -y tavily-mcp@latest
 ```
 
-Затем добавь API ключ в `~/.claude.json` → `projects` → `mcpServers`:
-
+Добавь API ключ в `~/.claude.json` → `projects` → `mcpServers`:
 ```json
 {
   "tavily-search": {
     "type": "stdio",
     "command": "npx",
     "args": ["-y", "tavily-mcp@latest"],
-    "env": {
-      "TAVILY_API_KEY": "tvly-xxx"
-    }
+    "env": { "TAVILY_API_KEY": "tvly-xxx" }
   }
 }
 ```
-
-### Альтернативы
-
-- **WebFetch** — скачивание конкретных URL (работает из коробки)
-- **Brave Search MCP** — 2000 запросов/мес бесплатно
-- **Kimi CLI** — родной CLI от Moonshot с встроенным поиском
 
 ---
 
 ## Troubleshooting
 
-### WebFetch: "Unable to verify domain"
-- `domain_info` endpoint замокан в прокси
-- Перезапусти прокси
-
-### "Invalid Authentication"
-- Проверь API ключ в kimi-proxy.js
-- Проверь баланс на moonshot
-
-### "thinking is enabled but reasoning_content is missing"
-- Начни новую сессию (`/exit` → `claude-kimi`)
-
-### Нужен VPN?
-- Да, для api.moonshot.ai может потребоваться VPN
-
----
-
-## Источники
-
-- [Moonshot AI Platform](https://platform.moonshot.ai/)
-- [Kimi K2.5 HuggingFace](https://huggingface.co/moonshotai/Kimi-K2.5)
-- [Kimi K2 GitHub](https://github.com/MoonshotAI/Kimi-K2)
-- [Kimi CLI](https://github.com/MoonshotAI/kimi-cli)
-- [Go Moonshot SDK](https://github.com/northes/go-moonshot)
+| Проблема | Решение |
+|----------|---------|
+| WebFetch: "Unable to verify domain" | Перезапусти прокси |
+| "Invalid Authentication" | Проверь API ключ / баланс Moonshot |
+| "thinking is enabled but reasoning_content is missing" | Новая сессия (`/exit` → `claude-kimi`) |
+| Патч слетел | Запусти `claude-pro` или `claude-kimi` — автопатч |
+| Прокси не запущен | `start-kimi-proxy` |
 
 ---
 
 ## Что работает
 
-| Инструмент | Статус | Примечание |
-|------------|--------|------------|
-| Bash, Read, Write, Edit | Работает | Инструменты CLI |
-| Glob, Grep | Работает | Поиск по файлам |
-| WebFetch | Работает | domain_info замокан в прокси |
-| Tavily Search (MCP) | Работает | Замена WebSearch |
-| Tool Calling | Работает | Через прокси конвертер |
-| Streaming | Работает | SSE конвертация |
-| WebSearch | Не работает | server_tool_use Anthropic, заменён Tavily |
+| Инструмент | claude-pro | claude-kimi |
+|------------|-----------|-------------|
+| Bash, Read, Write, Edit | OK | OK |
+| Glob, Grep | OK | OK |
+| WebFetch | OK | OK (domain_info mock) |
+| WebSearch | OK | Нет (замена: Tavily MCP) |
+| Tavily Search (MCP) | OK | OK |
+| Tool Calling | OK | OK (конвертация) |
+| Streaming | OK (passthrough) | OK (SSE конвертация) |
+| Подписка/OAuth | OK | Нет (API ключ Kimi) |
 
 ---
 
-*Документ: v3.3 | 29.01.2026*
+*Документ: v4.0 | 29.01.2026*
