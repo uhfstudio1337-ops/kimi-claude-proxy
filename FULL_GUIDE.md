@@ -761,7 +761,7 @@ curl http://localhost:8787/health
 | tool_calls must be followed by tool | Начни новую сессию |
 | WebFetch: Unable to verify domain | Перезапусти прокси |
 | Auth conflict | `claude /logout` → `claude-kimi` |
-| После обновления Claude Code | Запусти патч заново |
+| После обновления Claude Code | `claude-kimi.cmd` автоматически пропатчит при запуске |
 
 ---
 
