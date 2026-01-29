@@ -191,6 +191,7 @@ claude mcp add tavily-search -- npx -y tavily-mcp@latest
 | "thinking is enabled but reasoning_content is missing" | Новая сессия (`/exit` → `claude-kimi`) |
 | Патч слетел | Запусти `claude-pro` или `claude-kimi` — автопатч |
 | Прокси не запущен | `start-kimi-proxy` |
+| `/resume` не работает в Kimi | Известное ограничение: сессии сохраняются локально, но Kimi не поддерживает восстановление контекста через Anthropic API. Используй `/resume` только в `claude-pro` |
 
 ---
 
@@ -206,7 +207,8 @@ claude mcp add tavily-search -- npx -y tavily-mcp@latest
 | Tool Calling | OK | OK (конвертация) |
 | Streaming | OK (passthrough) | OK (SSE конвертация) |
 | Подписка/OAuth | OK | Нет (API ключ Kimi) |
+| /resume (продолжение сессии) | OK | Не работает |
 
 ---
 
-*Документ: v4.0 | 29.01.2026*
+*Документ: v4.1 | 29.01.2026*

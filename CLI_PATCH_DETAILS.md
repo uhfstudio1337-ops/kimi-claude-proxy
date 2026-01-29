@@ -15,18 +15,21 @@ Claude Code CLI при каждом запуске и во время работ
 - Отправляет **аналитику** в Sentry, Statsig, Segment, Datadog, GrowthBook
 - Проверяет **лицензию** и feature-флаги
 
-Для работы через Kimi K2.5 API нужно:
-1. Перенаправить API-запросы на локальный прокси
-2. Заблокировать всю телеметрию (иначе ошибки и утечка данных)
-3. Заблокировать автообновления (иначе патч слетит)
+Патч решает две задачи:
+1. **Все запросы через Smart Proxy** (localhost:8787) — прокси решает куда направить:
+   - `claude-pro` → прозрачный проброс на Anthropic (подписка Max/Pro)
+   - `claude-kimi` → конвертация и отправка в Kimi K2.5
+2. **Телеметрия заблокирована** — для обоих режимов
 
 ---
 
 ## 1. API Endpoints -> Proxy (17 замен)
 
-**Что:** Все обращения к `https://api.anthropic.com` перенаправлены на `http://localhost:8787` (локальный прокси).
+**Что:** Все обращения к `https://api.anthropic.com` перенаправлены на `http://localhost:8787` (Smart Proxy).
 
-**Зачем:** Прокси конвертирует формат Anthropic API в формат OpenAI API, который понимает Kimi K2.5. Без этого CLI не сможет общаться с Kimi.
+**Зачем:** Smart Proxy v3.0 определяет режим по заголовку `x-api-key`:
+- `sk-kimi-proxy` → конвертирует в OpenAI формат и отправляет в Kimi K2.5
+- Любой другой / OAuth → прозрачно пробрасывает на `api.anthropic.com`
 
 | Было | Стало | Кол-во |
 |------|-------|--------|
@@ -35,23 +38,23 @@ Claude Code CLI при каждом запуске и во время работ
 
 **Результат — 16 proxy-URL в cli.js:**
 
-| URL | Назначение |
-|-----|------------|
-| `localhost:8787` | Базовый API endpoint |
-| `localhost:8787/oauth/authorize` | Mock OAuth авторизация |
-| `localhost:8787/v1/oauth/token` | Mock получение токена |
-| `localhost:8787/v1/oauth/hello` | Mock проверка токена |
-| `localhost:8787/api/oauth/claude_cli/create_api_key` | Mock создание API ключа |
-| `localhost:8787/api/oauth/claude_cli/roles` | Mock роли пользователя |
-| `localhost:8787/oauth/code/success` | Mock OAuth callback |
-| `localhost:8787/oauth/code/callback` | Mock OAuth redirect |
-| `localhost:8787/api/hello` | Mock health check |
-| `localhost:8787/api/organization/.../claude_code_sonnet_1m_access` | Mock проверка доступа |
-| `localhost:8787/api/claude_code/organizations/metrics_enabled` | Mock метрики |
-| `localhost:8787/api/claude_code/metrics` | Mock отправка метрик |
-| `localhost:8787/api/claude_code/link_vcs_account` | Mock привязка VCS |
-| `localhost:8787/api/web/domain_info` | Mock проверка домена (для WebFetch) |
-| `localhost:8787/api/claude_cli_feedback` | Mock фидбек |
+| URL | Назначение | claude-pro | claude-kimi |
+|-----|------------|-----------|-------------|
+| `localhost:8787` | Базовый API endpoint | → api.anthropic.com | → api.moonshot.ai |
+| `localhost:8787/oauth/authorize` | OAuth авторизация | → platform.claude.com | Mock |
+| `localhost:8787/v1/oauth/token` | Получение токена | → platform.claude.com | Mock |
+| `localhost:8787/v1/oauth/hello` | Проверка токена | → platform.claude.com | Mock |
+| `localhost:8787/api/oauth/claude_cli/create_api_key` | Создание API ключа | → claude.ai | Mock |
+| `localhost:8787/api/oauth/claude_cli/roles` | Роли пользователя | → claude.ai | Mock |
+| `localhost:8787/oauth/code/success` | OAuth callback | → platform.claude.com | Mock |
+| `localhost:8787/oauth/code/callback` | OAuth redirect | → platform.claude.com | Mock |
+| `localhost:8787/api/hello` | Health check | → claude.ai | Mock |
+| `localhost:8787/api/organization/.../access` | Проверка доступа | → claude.ai | Mock |
+| `localhost:8787/api/claude_code/organizations/metrics_enabled` | Метрики | → claude.ai | Mock |
+| `localhost:8787/api/claude_code/metrics` | Отправка метрик | → claude.ai | Mock |
+| `localhost:8787/api/claude_code/link_vcs_account` | Привязка VCS | → claude.ai | Mock |
+| `localhost:8787/api/web/domain_info` | Проверка домена (WebFetch) | → claude.ai | Mock (always allowed) |
+| `localhost:8787/api/claude_cli_feedback` | Фидбек | → claude.ai | Mock |
 
 ---
 
@@ -59,7 +62,7 @@ Claude Code CLI при каждом запуске и во время работ
 
 **Что:** `https://api-staging.anthropic.com` -> `http://0.0.0.0:1`
 
-**Зачем:** Staging-сервер Anthropic для тестирования. Не нужен, блокируем чтобы не было ошибок при попытке подключения.
+**Зачем:** Staging-сервер Anthropic для тестирования. Не нужен ни в одном режиме.
 
 ---
 
@@ -69,9 +72,9 @@ Claude Code CLI при каждом запуске и во время работ
 
 | Было | Стало | Зачем |
 |------|-------|-------|
-| `platform.claude.com/oauth` | `localhost:8787/oauth` (3x) | Прокси отдает mock-токен |
-| `platform.claude.com/v1/oauth` | `localhost:8787/v1/oauth` (2x) | Прокси отдает mock-токен |
-| `claude.ai/oauth` | `localhost:8787/oauth` (1x) | Прокси отдает mock-токен |
+| `platform.claude.com/oauth` | `localhost:8787/oauth` (3x) | Прокси форвардит на platform.claude.com (Pro) или мокает (Kimi) |
+| `platform.claude.com/v1/oauth` | `localhost:8787/v1/oauth` (2x) | Аналогично |
+| `claude.ai/oauth` | `localhost:8787/oauth` (1x) | Аналогично |
 | `claude.ai/admin-settings` | Dead (1x) | UI ссылка, не нужна |
 | `claude.ai/settings/data-privacy-controls` | Dead (4x) | UI ссылка, не нужна |
 | `claude.ai/settings/usage` | Dead (1x) | UI ссылка, не нужна |
@@ -84,7 +87,7 @@ Claude Code CLI при каждом запуске и во время работ
 
 **Что:** `https://mcp-proxy.anthropic.com` -> `http://0.0.0.0:1`
 
-**Зачем:** Anthropic-овский MCP прокси для подключения к их MCP серверам. Мы используем свои MCP (Tavily), поэтому блокируем.
+**Зачем:** Anthropic-овский MCP прокси. Мы используем свои MCP (Tavily), поэтому блокируем.
 
 ---
 
@@ -92,7 +95,7 @@ Claude Code CLI при каждом запуске и во время работ
 
 **Что:** Все URL-адреса сервисов аналитики заблокированы.
 
-**Зачем:** CLI отправляет подробную телеметрию о каждом действии, каждой ошибке, каждом вызове инструмента. Это:
+**Зачем:** CLI отправляет подробную телеметрию. Блокируем в обоих режимах:
 - Утечка данных о работе
 - Лишний трафик
 - Ошибки при недоступности серверов
@@ -168,7 +171,7 @@ this._client.captureEvent(      ->  ((x)=>{})(
 | `docs.anthropic.com` | 3x | Документация API |
 | `support.claude.com` | 2x | Поддержка (статьи о guest passes и т.д.) |
 
-**Зачем:** CLI может открывать эти URL в браузере или использовать для проверок. Блокируем для полной изоляции.
+**Зачем:** CLI может открывать эти URL в браузере или использовать для проверок. Блокируем для полной изоляции от телеметрии.
 
 ---
 
@@ -193,33 +196,29 @@ this._client.captureEvent(      ->  ((x)=>{})(
 | `play.google.com/.../com.anthropic` | 1x | Android приложение |
 | `apps.apple.com/app/claude` | 1x | iOS приложение |
 
-**Зачем:** Эти URL используются в:
-- Сообщениях пользователю ("подробнее: code.claude.com/docs/...")
-- Проверках (Chrome extension, мобильные приложения)
-- Upsell-сообщениях ("обновите подписку")
+**Зачем:** UI/промо ссылки. Блокировка не ломает функциональность CLI.
 
-Блокировка не ломает функциональность CLI, просто ссылки ведут в никуда.
-
-**Исключение:** `claude.ai/api` перенаправлен на прокси, потому что через него CLI проверяет `domain_info` перед WebFetch.
+**Исключение:** `claude.ai/api` перенаправлен на прокси — CLI проверяет `domain_info` перед WebFetch, прокси форвардит на claude.ai (Pro) или мокает (Kimi).
 
 ---
 
 ## Итого
 
-| Категория | Замен | Результат |
-|-----------|-------|-----------|
-| API -> Proxy | 17 | Запросы идут через Kimi прокси |
-| Staging -> Dead | 2 | Тестовый API заблокирован |
-| OAuth -> Proxy/Dead | 14 | Авторизация через mock |
-| MCP Proxy -> Dead | 1 | Anthropic MCP заблокирован |
-| Телеметрия -> Dead | 12 | Никакой аналитики |
-| Автообновления -> Dead | 4 | CLI не обновляется |
-| Sentry -> No-op | 3 | Error reporting отключён |
-| LogEvent -> Safe | 7 | Трекинг событий отключён |
-| Домены Anthropic -> Dead | 14 | Сайты Anthropic заблокированы |
-| Ссылки Claude -> Dead | 162 | Все UI/документация ссылки заблокированы |
-| **claude.ai/api -> Proxy** | - | domain_info для WebFetch работает |
-| **Всего** | **239** | **Полная изоляция от Anthropic** |
+| Категория | Замен | claude-pro | claude-kimi |
+|-----------|-------|-----------|-------------|
+| API -> Proxy | 17 | → api.anthropic.com | → api.moonshot.ai |
+| Staging -> Dead | 2 | Заблокирован | Заблокирован |
+| OAuth -> Proxy | 6 | → platform.claude.com | Mock |
+| OAuth UI -> Dead | 8 | Заблокирован | Заблокирован |
+| MCP Proxy -> Dead | 1 | Заблокирован | Заблокирован |
+| Телеметрия -> Dead | 12 | Заблокирована | Заблокирована |
+| Автообновления -> Dead | 4 | Заблокированы | Заблокированы |
+| Sentry -> No-op | 3 | Отключён | Отключён |
+| LogEvent -> Safe | 7 | Отключён | Отключён |
+| Домены Anthropic -> Dead | 14 | Заблокированы | Заблокированы |
+| Ссылки Claude -> Dead | 162 | Заблокированы | Заблокированы |
+| **claude.ai/api -> Proxy** | 3 | → claude.ai | Mock |
+| **Всего** | **239** | **Работает по подписке** | **Работает через Kimi** |
 
 ---
 
@@ -235,15 +234,25 @@ this._client.captureEvent(      ->  ((x)=>{})(
 
 ---
 
+## Известные ограничения
+
+| Ограничение | Режим | Причина |
+|-------------|-------|---------|
+| WebSearch не работает | claude-kimi | `server_tool_use` — Anthropic server-side. Замена: Tavily MCP |
+| `/resume` не работает | claude-kimi | Kimi не поддерживает восстановление контекста Anthropic сессий |
+| Feature flags не загружаются | Оба | Statsig/GrowthBook заблокированы. Используются кэшированные значения из `.claude.json` |
+
+---
+
 ## Защита от слёта патча
 
 | Уровень | Механизм | Описание |
 |---------|----------|----------|
 | 1 | `autoUpdates: false` | В `.claude.json`, CLI не проверяет обновления |
 | 2 | `attrib +R` на cli.js | Windows read-only флаг, файл нельзя перезаписать |
-| 3 | Автопатч в `claude-kimi.cmd` | При запуске проверяет патч, если слетел — автоматически применяет заново |
+| 3 | Автопатч в `claude-pro.cmd` / `claude-kimi.cmd` | При запуске проверяет патч, если слетел — автоматически применяет заново |
 | 4 | Фиксация версии npm | `npm install -g @anthropic-ai/claude-code@2.1.23` |
 
 ---
 
-*Документ: v1.0 | 29.01.2026*
+*Документ: v2.0 | 29.01.2026*
