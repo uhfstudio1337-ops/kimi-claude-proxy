@@ -63,6 +63,7 @@ curl http://localhost:8787/health
 | `%USERPROFILE%\.local\bin\claude-kimi.cmd` | Запуск Claude+Kimi |
 | `%USERPROFILE%\.local\bin\find-urls.js` | Сканер URL |
 | `%USERPROFILE%\.claude\commands\kimi.md` | Skill /kimi |
+| Tavily MCP | Веб-поиск (замена WebSearch) |
 
 ---
 
@@ -172,30 +173,47 @@ sk-IveN1uypGMTqTnjkCIBOv64c1kN1JSMprZ7EYVbCi9I1H4RA
 
 Kimi `$web_search` работает иначе — через tool_calls. Это разные механизмы, которые нельзя полностью эмулировать через прокси.
 
-**Решения:**
+**Решение: Tavily MCP (РАБОТАЕТ!)**
 
-1. **WebFetch работает!** Используй для конкретных URL:
-   ```
-   Скачай https://reuters.com и расскажи новости
-   ```
+Tavily MCP полностью заменяет WebSearch. 1000 запросов/мес бесплатно.
 
-2. **MCP сервер для поиска** — добавить Tavily или Brave Search:
-   ```json
-   {
-     "mcpServers": {
-       "tavily": {
-         "command": "npx",
-         "args": ["-y", "tavily-mcp"],
-         "env": { "TAVILY_API_KEY": "tvly-xxx" }
-       }
-     }
-   }
-   ```
+### Установка
 
-3. **Kimi CLI** — использовать родной CLI от Moonshot:
-   ```
-   npm install -g @anthropic-ai/kimi-cli
-   ```
+```bash
+npm install -g tavily-mcp@latest
+```
+
+### Регистрация
+
+1. Зарегайся на https://tavily.com/
+2. Получи API ключ (формат `tvly-xxx`)
+
+### Добавление в Claude Code
+
+```bash
+claude mcp add tavily-search -- npx -y tavily-mcp@latest
+```
+
+Затем добавь API ключ в `~/.claude.json` → `projects` → `mcpServers`:
+
+```json
+{
+  "tavily-search": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "tavily-mcp@latest"],
+    "env": {
+      "TAVILY_API_KEY": "tvly-xxx"
+    }
+  }
+}
+```
+
+### Альтернативы
+
+- **WebFetch** — скачивание конкретных URL (работает из коробки)
+- **Brave Search MCP** — 2000 запросов/мес бесплатно
+- **Kimi CLI** — родной CLI от Moonshot с встроенным поиском
 
 ---
 
@@ -227,4 +245,18 @@ Kimi `$web_search` работает иначе — через tool_calls. Это
 
 ---
 
-*Документ: v3.2 | 28.01.2026*
+## Что работает
+
+| Инструмент | Статус | Примечание |
+|------------|--------|------------|
+| Bash, Read, Write, Edit | Работает | Инструменты CLI |
+| Glob, Grep | Работает | Поиск по файлам |
+| WebFetch | Работает | domain_info замокан в прокси |
+| Tavily Search (MCP) | Работает | Замена WebSearch |
+| Tool Calling | Работает | Через прокси конвертер |
+| Streaming | Работает | SSE конвертация |
+| WebSearch | Не работает | server_tool_use Anthropic, заменён Tavily |
+
+---
+
+*Документ: v3.3 | 29.01.2026*
