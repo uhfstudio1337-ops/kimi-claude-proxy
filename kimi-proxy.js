@@ -1,4 +1,4 @@
-// Smart Proxy v3.0 — Dual Mode (Kimi K2.5 + Anthropic)
+// Smart Proxy v3.1 — Dual Mode (Kimi K2.5 + Anthropic) + Cross-mode /resume fix
 // Роутинг по API ключу:
 //   sk-kimi-proxy → Kimi K2.5 (конвертация Anthropic→OpenAI)
 //   Любой другой  → Anthropic API (прозрачный проброс)
@@ -300,6 +300,27 @@ function handleKimiMessages(req, res, body) {
         const anthropicReq = JSON.parse(body);
         const originalModel = anthropicReq.model;
         const isStream = anthropicReq.stream;
+
+        // RESUME FIX: Strip thinking blocks before conversion (Pro → Kimi)
+        if (anthropicReq.messages && Array.isArray(anthropicReq.messages)) {
+            let stripped = 0;
+            for (const msg of anthropicReq.messages) {
+                if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+                    const before = msg.content.length;
+                    msg.content = msg.content.filter(b => b.type !== 'thinking');
+                    if (msg.content.length < before) stripped++;
+                    if (msg.content.length === 0) {
+                        msg.content.push({ type: 'text', text: '' });
+                    }
+                }
+            }
+            if (stripped > 0) {
+                console.log(`[KIMI] RESUME FIX: Stripped thinking from ${stripped} assistant msgs (Pro → Kimi)`);
+            }
+        }
+        // Strip thinking param (Kimi doesn't support it)
+        delete anthropicReq.thinking;
+
         const openaiReq = convertRequest(anthropicReq);
 
         const toolCount = openaiReq.tools?.length || 0;
@@ -377,6 +398,59 @@ function getAnthropicTarget(urlPath) {
         return 'claude.ai';
     }
     return 'api.anthropic.com';
+}
+
+// ═══════════════════════════════════════════════════════════
+// RESUME FIX: Sanitize messages for cross-mode compatibility
+// ═══════════════════════════════════════════════════════════
+
+function sanitizeForAnthropic(body, url) {
+    // Only process messages API
+    if (!url.includes('/messages')) return body;
+
+    try {
+        const req = JSON.parse(body);
+        if (!req.thinking || !req.messages || !Array.isArray(req.messages)) return body;
+
+        // Check if any assistant messages lack thinking blocks (came from Kimi)
+        const hasIncompleteThinking = req.messages.some(msg =>
+            msg.role === 'assistant' &&
+            Array.isArray(msg.content) &&
+            msg.content.some(b => b.type === 'tool_use' || b.type === 'text') &&
+            !msg.content.some(b => b.type === 'thinking')
+        );
+
+        if (!hasIncompleteThinking) return body;
+
+        // Cross-mode session: strip thinking from request and all messages
+        // Anthropic requires valid signatures on thinking blocks,
+        // so we can't inject fakes. Instead, disable thinking for this
+        // one request. Subsequent requests will re-enable it.
+        console.log('[ANTHROPIC] ═══ RESUME FIX ═══');
+        console.log('[ANTHROPIC]   Cross-mode session detected (Kimi → Pro)');
+        console.log('[ANTHROPIC]   Stripping thinking for compatibility');
+
+        delete req.thinking;
+
+        let stripped = 0;
+        for (const msg of req.messages) {
+            if (msg.role === 'assistant' && Array.isArray(msg.content)) {
+                const before = msg.content.length;
+                msg.content = msg.content.filter(b => b.type !== 'thinking');
+                if (msg.content.length < before) stripped++;
+                if (msg.content.length === 0) {
+                    msg.content.push({ type: 'text', text: '' });
+                }
+            }
+        }
+
+        console.log(`[ANTHROPIC]   Stripped thinking from ${stripped} msgs, ${req.messages.length} total`);
+        console.log('[ANTHROPIC] ═════════════════════');
+        return JSON.stringify(req);
+    } catch (e) {
+        console.log(`[ANTHROPIC] RESUME FIX parse error: ${e.message}`);
+        return body;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -466,7 +540,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({
             status: 'ok',
             proxy: 'smart-proxy',
-            version: '3.0',
+            version: '3.1',
             modes: { kimi: 'Kimi K2.5 (format conversion)', anthropic: 'Transparent forward' },
             routing: 'x-api-key: sk-kimi-proxy → Kimi, otherwise → Anthropic'
         }));
@@ -527,7 +601,8 @@ const server = http.createServer((req, res) => {
             const chunks = [];
             req.on('data', chunk => chunks.push(chunk));
             req.on('end', () => {
-                const body = Buffer.concat(chunks).toString();
+                let body = Buffer.concat(chunks).toString();
+                body = sanitizeForAnthropic(body, req.url);
                 forwardToAnthropic(req, res, body);
             });
         } else {
@@ -539,7 +614,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
     console.log('');
     console.log('╔══════════════════════════════════════════════════════════╗');
-    console.log('║          Smart Proxy v3.0 — Dual Mode                    ║');
+    console.log('║          Smart Proxy v3.1 — Dual Mode                    ║');
     console.log('╠══════════════════════════════════════════════════════════╣');
     console.log('║                                                          ║');
     console.log('║  Mode 1: KIMI K2.5                                       ║');
