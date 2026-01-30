@@ -1,4 +1,4 @@
-// Smart Proxy v3.1 — Dual Mode (Kimi K2.5 + Anthropic) + Cross-mode /resume fix
+// Smart Proxy v3.2 — Dual Mode (Kimi K2.5 + Anthropic) + Cross-mode /resume fix + Tool ID sanitize
 // Роутинг по API ключу:
 //   sk-kimi-proxy → Kimi K2.5 (конвертация Anthropic→OpenAI)
 //   Любой другой  → Anthropic API (прозрачный проброс)
@@ -62,7 +62,7 @@ function convertMessages(anthropicMessages) {
                         }
                         toolResults.push({
                             role: 'tool',
-                            tool_call_id: block.tool_use_id,
+                            tool_call_id: sanitizeToolId(block.tool_use_id),
                             content: typeof resultContent === 'string' ? resultContent : JSON.stringify(resultContent)
                         });
                     }
@@ -83,7 +83,7 @@ function convertMessages(anthropicMessages) {
                         textContent += block.text;
                     } else if (block.type === 'tool_use') {
                         toolCalls.push({
-                            id: block.id,
+                            id: sanitizeToolId(block.id),
                             type: 'function',
                             function: {
                                 name: block.name,
@@ -136,6 +136,17 @@ function convertRequest(anthropicReq) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// SANITIZE: Tool ID для совместимости с Anthropic API
+// ═══════════════════════════════════════════════════════════
+
+function sanitizeToolId(id) {
+    if (!id) return 'tool_' + Date.now();
+    // Anthropic требует: ^[a-zA-Z0-9_-]+
+    // Заменяем всё недопустимое на underscore
+    return id.replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+// ═══════════════════════════════════════════════════════════
 // КОНВЕРТАЦИЯ: OpenAI → Anthropic (Kimi mode)
 // ═══════════════════════════════════════════════════════════
 
@@ -160,7 +171,7 @@ function convertResponse(openaiResp, originalModel) {
         for (const tc of message.tool_calls) {
             let args = {};
             try { args = JSON.parse(tc.function.arguments); } catch (e) { args = { _raw: tc.function.arguments }; }
-            content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input: args });
+            content.push({ type: 'tool_use', id: sanitizeToolId(tc.id), name: tc.function.name, input: args });
         }
     }
     if (content.length === 0) {
@@ -230,7 +241,7 @@ function createStreamingHandler(res, originalModel) {
             for (const tc of delta.tool_calls) {
                 const idx = tc.index;
                 if (!toolCalls[idx]) toolCalls[idx] = { id: '', name: '', arguments: '' };
-                if (tc.id) toolCalls[idx].id = tc.id;
+                if (tc.id) toolCalls[idx].id = sanitizeToolId(tc.id);
                 if (tc.function?.name) toolCalls[idx].name += tc.function.name;
                 if (tc.function?.arguments) toolCalls[idx].arguments += tc.function.arguments;
             }
@@ -540,7 +551,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({
             status: 'ok',
             proxy: 'smart-proxy',
-            version: '3.1',
+            version: '3.2',
             modes: { kimi: 'Kimi K2.5 (format conversion)', anthropic: 'Transparent forward' },
             routing: 'x-api-key: sk-kimi-proxy → Kimi, otherwise → Anthropic'
         }));
@@ -614,7 +625,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
     console.log('');
     console.log('╔══════════════════════════════════════════════════════════╗');
-    console.log('║          Smart Proxy v3.1 — Dual Mode                    ║');
+    console.log('║          Smart Proxy v3.2 — Dual Mode                    ║');
     console.log('╠══════════════════════════════════════════════════════════╣');
     console.log('║                                                          ║');
     console.log('║  Mode 1: KIMI K2.5                                       ║');
