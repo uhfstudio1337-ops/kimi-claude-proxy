@@ -1,12 +1,12 @@
-# Claude Code Smart Proxy: Полный гайд (v4.0)
+# Claude Code Smart Proxy: Полный гайд (v4.1)
 
-Настроено: 29.01.2026
+Настроено: 30.01.2026
 
 ---
 
 ## Что это
 
-**Smart Proxy v3.0** — локальный прокси-сервер, который позволяет использовать Claude Code CLI в двух режимах через один пропатченный cli.js:
+**Smart Proxy v3.3** — локальный прокси-сервер, который позволяет использовать Claude Code CLI в двух режимах через один пропатченный cli.js:
 
 | Режим | Команда | API | Цена |
 |-------|---------|-----|------|
@@ -188,10 +188,10 @@ claude mcp add tavily-search -- npx -y tavily-mcp@latest
 |----------|---------|
 | WebFetch: "Unable to verify domain" | Перезапусти прокси |
 | "Invalid Authentication" | Проверь API ключ / баланс Moonshot |
-| "thinking is enabled but reasoning_content is missing" | Новая сессия (`/exit` → `claude-kimi`) |
+| "thinking is enabled but reasoning_content is missing" | Исправлено в v3.3 — прокси генерирует `reasoning_content` для всех assistant-сообщений. Если ошибка повторяется — перезапусти прокси |
 | Патч слетел | Запусти `claude-pro` или `claude-kimi` — автопатч |
 | Прокси не запущен | `start-kimi-proxy` |
-| `/resume` не работает в Kimi | Известное ограничение: сессии сохраняются локально, но Kimi не поддерживает восстановление контекста через Anthropic API. Используй `/resume` только в `claude-pro` |
+| `/resume` в Kimi | Исправлено в v3.3: прокси конвертирует thinking-блоки Anthropic в `reasoning_content` для Kimi. Сессии с очень большим контекстом (>200K токенов) могут не уместиться |
 
 ---
 
@@ -207,8 +207,8 @@ claude mcp add tavily-search -- npx -y tavily-mcp@latest
 | Tool Calling | OK | OK (конвертация) |
 | Streaming | OK (passthrough) | OK (SSE конвертация) |
 | Подписка/OAuth | OK | Нет (API ключ Kimi) |
-| /resume (продолжение сессии) | OK | Не работает |
+| /resume (продолжение сессии) | OK | OK (v3.3+) |
 
 ---
 
-*Документ: v4.1 | 29.01.2026*
+*Документ: v4.2 | 30.01.2026*

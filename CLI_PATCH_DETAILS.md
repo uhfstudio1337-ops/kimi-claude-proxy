@@ -239,7 +239,7 @@ this._client.captureEvent(      ->  ((x)=>{})(
 | Ограничение | Режим | Причина |
 |-------------|-------|---------|
 | WebSearch не работает | claude-kimi | `server_tool_use` — Anthropic server-side. Замена: Tavily MCP |
-| `/resume` не работает | claude-kimi | Kimi не поддерживает восстановление контекста Anthropic сессий |
+| `/resume` — большие сессии | claude-kimi | Сессии >200K токенов могут не уместиться в контекст Kimi (256K). Работает с v3.3 для обычных сессий |
 | Feature flags не загружаются | Оба | Statsig/GrowthBook заблокированы. Используются кэшированные значения из `.claude.json` |
 
 ---
@@ -255,4 +255,4 @@ this._client.captureEvent(      ->  ((x)=>{})(
 
 ---
 
-*Документ: v2.0 | 29.01.2026*
+*Документ: v2.1 | 30.01.2026*

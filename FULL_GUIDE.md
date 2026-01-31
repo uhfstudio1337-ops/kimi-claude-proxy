@@ -344,24 +344,30 @@ function convertMessages(anthropicMessages) {
         } else if (msg.role === 'assistant') {
             if (Array.isArray(msg.content)) {
                 let textContent = '';
+                let reasoningContent = '';
                 const toolCalls = [];
                 for (const block of msg.content) {
                     if (block.type === 'text') textContent += block.text;
                     else if (block.type === 'tool_use') {
                         toolCalls.push({
-                            id: block.id, type: 'function',
+                            id: sanitizeToolId(block.id), type: 'function',
                             function: { name: block.name, arguments: JSON.stringify(block.input) }
                         });
+                    } else if (block.type === 'thinking' && block.thinking) {
+                        reasoningContent += block.thinking;
                     }
                 }
                 const assistantMsg = { role: 'assistant', content: textContent || null };
-                if (toolCalls.length > 0) {
-                    assistantMsg.tool_calls = toolCalls;
-                    assistantMsg.reasoning_content = 'Executing tool call.';
-                }
+                if (toolCalls.length > 0) assistantMsg.tool_calls = toolCalls;
+                // RESUME FIX v2: reasoning_content on ALL assistant msgs
+                if (reasoningContent) assistantMsg.reasoning_content = reasoningContent;
+                else if (toolCalls.length > 0) assistantMsg.reasoning_content = 'Executing tool call.';
+                else if (textContent) assistantMsg.reasoning_content = 'Thinking...';
                 messages.push(assistantMsg);
             } else {
-                messages.push({ role: 'assistant', content: msg.content || '' });
+                const assistantMsg = { role: 'assistant', content: msg.content || '' };
+                assistantMsg.reasoning_content = 'Thinking...';
+                messages.push(assistantMsg);
             }
         }
     }
@@ -757,7 +763,7 @@ curl http://localhost:8787/health
 | Проблема | Решение |
 |----------|---------|
 | Invalid Authentication | Проверь API ключ и баланс на moonshot |
-| thinking...reasoning_content missing | Начни новую сессию |
+| thinking...reasoning_content missing | Исправлено в v3.3. Перезапусти прокси. Если повторяется — начни новую сессию |
 | tool_calls must be followed by tool | Начни новую сессию |
 | WebFetch: Unable to verify domain | Перезапусти прокси |
 | Auth conflict | `claude /logout` → `claude-kimi` |

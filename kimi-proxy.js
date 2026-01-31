@@ -1,4 +1,4 @@
-// Smart Proxy v3.2 — Dual Mode (Kimi K2.5 + Anthropic) + Cross-mode /resume fix + Tool ID sanitize
+// Smart Proxy v3.3 — Dual Mode (Kimi K2.5 + Anthropic) + /resume fix + Tool ID sanitize
 // Роутинг по API ключу:
 //   sk-kimi-proxy → Kimi K2.5 (конвертация Anthropic→OpenAI)
 //   Любой другой  → Anthropic API (прозрачный проброс)
@@ -52,12 +52,20 @@ function convertMessages(anthropicMessages) {
                 for (const block of msg.content) {
                     if (block.type === 'text') {
                         textParts.push(block.text);
-                    } else if (block.type === 'tool_result') {
+                    } else if (block.type === 'tool_result' || block.type === 'web_search_tool_result') {
+                        // web_search_tool_result = result from Anthropic's server-side WebSearch
+                        // Convert to regular tool result for Kimi compatibility
                         let resultContent = block.content;
                         if (Array.isArray(resultContent)) {
                             resultContent = resultContent
-                                .filter(c => c.type === 'text')
-                                .map(c => c.text)
+                                .filter(c => c.type === 'text' || c.type === 'web_search_result')
+                                .map(c => {
+                                    if (c.type === 'web_search_result') {
+                                        // Extract text from web search result blocks
+                                        return `[${c.title || 'Search Result'}](${c.url || ''})\n${c.snippet || c.text || ''}`;
+                                    }
+                                    return c.text;
+                                })
                                 .join('\n');
                         }
                         toolResults.push({
@@ -77,11 +85,14 @@ function convertMessages(anthropicMessages) {
         } else if (msg.role === 'assistant') {
             if (Array.isArray(msg.content)) {
                 let textContent = '';
+                let reasoningContent = '';
                 const toolCalls = [];
                 for (const block of msg.content) {
                     if (block.type === 'text') {
                         textContent += block.text;
-                    } else if (block.type === 'tool_use') {
+                    } else if (block.type === 'tool_use' || block.type === 'server_tool_use') {
+                        // server_tool_use = Anthropic's built-in tools (WebSearch etc.)
+                        // Convert them to regular tool_calls for Kimi compatibility
                         toolCalls.push({
                             id: sanitizeToolId(block.id),
                             type: 'function',
@@ -90,16 +101,30 @@ function convertMessages(anthropicMessages) {
                                 arguments: JSON.stringify(block.input)
                             }
                         });
+                    } else if (block.type === 'thinking' && block.thinking) {
+                        // Preserve thinking content as reasoning_content for Kimi
+                        reasoningContent += block.thinking;
                     }
                 }
                 const assistantMsg = { role: 'assistant', content: textContent || null };
                 if (toolCalls.length > 0) {
                     assistantMsg.tool_calls = toolCalls;
+                }
+                // RESUME FIX: Kimi K2.5 thinking mode requires reasoning_content
+                // on ALL assistant messages in history. Use original thinking if
+                // available, otherwise generate a placeholder.
+                if (reasoningContent) {
+                    assistantMsg.reasoning_content = reasoningContent;
+                } else if (toolCalls.length > 0) {
                     assistantMsg.reasoning_content = 'Executing tool call.';
+                } else if (textContent) {
+                    assistantMsg.reasoning_content = 'Thinking...';
                 }
                 messages.push(assistantMsg);
             } else {
-                messages.push({ role: 'assistant', content: msg.content || '' });
+                const assistantMsg = { role: 'assistant', content: msg.content || '' };
+                assistantMsg.reasoning_content = 'Thinking...';
+                messages.push(assistantMsg);
             }
         }
     }
@@ -312,25 +337,21 @@ function handleKimiMessages(req, res, body) {
         const originalModel = anthropicReq.model;
         const isStream = anthropicReq.stream;
 
-        // RESUME FIX: Strip thinking blocks before conversion (Pro → Kimi)
+        // RESUME FIX v2: Don't strip thinking blocks here — convertMessages()
+        // now extracts them as reasoning_content for Kimi compatibility.
+        // Only strip the thinking *parameter* (Kimi doesn't support Anthropic's thinking API).
+        delete anthropicReq.thinking;
+
+        // Log resume detection
         if (anthropicReq.messages && Array.isArray(anthropicReq.messages)) {
-            let stripped = 0;
-            for (const msg of anthropicReq.messages) {
-                if (msg.role === 'assistant' && Array.isArray(msg.content)) {
-                    const before = msg.content.length;
-                    msg.content = msg.content.filter(b => b.type !== 'thinking');
-                    if (msg.content.length < before) stripped++;
-                    if (msg.content.length === 0) {
-                        msg.content.push({ type: 'text', text: '' });
-                    }
-                }
-            }
-            if (stripped > 0) {
-                console.log(`[KIMI] RESUME FIX: Stripped thinking from ${stripped} assistant msgs (Pro → Kimi)`);
+            const thinkingMsgs = anthropicReq.messages.filter(m =>
+                m.role === 'assistant' && Array.isArray(m.content) &&
+                m.content.some(b => b.type === 'thinking')
+            ).length;
+            if (thinkingMsgs > 0) {
+                console.log(`[KIMI] RESUME FIX v2: ${thinkingMsgs} assistant msgs with thinking → reasoning_content`);
             }
         }
-        // Strip thinking param (Kimi doesn't support it)
-        delete anthropicReq.thinking;
 
         const openaiReq = convertRequest(anthropicReq);
 
@@ -405,10 +426,8 @@ function getAnthropicTarget(urlPath) {
     if (urlPath.startsWith('/v1/oauth') || urlPath.startsWith('/oauth')) {
         return 'platform.claude.com';
     }
-    if (urlPath.startsWith('/api/')) {
-        return 'claude.ai';
-    }
-    return 'api.anthropic.com';
+    // All API calls go to claude.ai (Claude Max subscription)
+    return 'claude.ai';
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -444,18 +463,44 @@ function sanitizeForAnthropic(body, url) {
         delete req.thinking;
 
         let stripped = 0;
+        let sanitizedIds = 0;
         for (const msg of req.messages) {
             if (msg.role === 'assistant' && Array.isArray(msg.content)) {
                 const before = msg.content.length;
                 msg.content = msg.content.filter(b => b.type !== 'thinking');
                 if (msg.content.length < before) stripped++;
+                // Sanitize tool_use IDs for Anthropic API compatibility
+                for (const block of msg.content) {
+                    if (block.type === 'tool_use' && block.id) {
+                        const sanitized = sanitizeToolId(block.id);
+                        if (sanitized !== block.id) {
+                            block.id = sanitized;
+                            sanitizedIds++;
+                        }
+                    }
+                }
                 if (msg.content.length === 0) {
                     msg.content.push({ type: 'text', text: '' });
+                }
+            }
+            // Sanitize tool_result tool_use_id for user messages
+            if (msg.role === 'user' && Array.isArray(msg.content)) {
+                for (const block of msg.content) {
+                    if (block.type === 'tool_result' && block.tool_use_id) {
+                        const sanitized = sanitizeToolId(block.tool_use_id);
+                        if (sanitized !== block.tool_use_id) {
+                            block.tool_use_id = sanitized;
+                            sanitizedIds++;
+                        }
+                    }
                 }
             }
         }
 
         console.log(`[ANTHROPIC]   Stripped thinking from ${stripped} msgs, ${req.messages.length} total`);
+        if (sanitizedIds > 0) {
+            console.log(`[ANTHROPIC]   Sanitized ${sanitizedIds} tool IDs`);
+        }
         console.log('[ANTHROPIC] ═════════════════════');
         return JSON.stringify(req);
     } catch (e) {
@@ -551,7 +596,7 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({
             status: 'ok',
             proxy: 'smart-proxy',
-            version: '3.2',
+            version: '3.3',
             modes: { kimi: 'Kimi K2.5 (format conversion)', anthropic: 'Transparent forward' },
             routing: 'x-api-key: sk-kimi-proxy → Kimi, otherwise → Anthropic'
         }));
@@ -625,7 +670,7 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
     console.log('');
     console.log('╔══════════════════════════════════════════════════════════╗');
-    console.log('║          Smart Proxy v3.2 — Dual Mode                    ║');
+    console.log('║          Smart Proxy v3.3 — Dual Mode                    ║');
     console.log('╠══════════════════════════════════════════════════════════╣');
     console.log('║                                                          ║');
     console.log('║  Mode 1: KIMI K2.5                                       ║');
