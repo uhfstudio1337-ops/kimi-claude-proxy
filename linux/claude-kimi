@@ -1,0 +1,51 @@
+#!/bin/bash
+# Claude Code + Kimi K2.5 с автопатчем v2.0 (Linux)
+# Автоматически проверяет и патчит cli.js при каждом запуске
+
+export ANTHROPIC_BASE_URL="http://localhost:8787"
+export ANTHROPIC_API_KEY="sk-kimi-proxy"
+
+# Находим cli.js
+CLI_PATH="$(npm root -g)/@anthropic-ai/claude-code/cli.js"
+if [ ! -f "$CLI_PATH" ]; then
+    echo "[ОШИБКА] cli.js не найден: $CLI_PATH"
+    echo "Установите: npm install -g @anthropic-ai/claude-code"
+    exit 1
+fi
+
+# ══════════════════════════════════════════════════════════
+# Проверка: пропатчен ли cli.js
+# ══════════════════════════════════════════════════════════
+if ! grep -q "localhost:8787" "$CLI_PATH" 2>/dev/null; then
+    echo "══════════════════════════════════════════════════════════"
+    echo " [!] cli.js НЕ пропатчен — автопатч..."
+    echo "══════════════════════════════════════════════════════════"
+
+    # Снимаем защиту
+    chmod u+w "$CLI_PATH" 2>/dev/null
+
+    # Запускаем патчер
+    node "$HOME/.local/bin/patch-claude-full.js" "$CLI_PATH"
+    if [ $? -ne 0 ]; then
+        echo "[ОШИБКА] Патч не удался!"
+        exit 1
+    fi
+
+    # Защита от перезаписи
+    chmod a-w "$CLI_PATH"
+    echo "[OK] cli.js пропатчен и защищён от записи"
+    echo "══════════════════════════════════════════════════════════"
+else
+    echo "[OK] cli.js пропатчен"
+fi
+
+# ══════════════════════════════════════════════════════════
+# Проверка прокси
+# ══════════════════════════════════════════════════════════
+if ! curl -s http://localhost:8787/health >/dev/null 2>&1; then
+    echo "[!] Прокси не запущен! Запусти: start-kimi-proxy"
+    exit 1
+fi
+
+# Запуск Claude Code
+exec claude "$@"

@@ -1,0 +1,4 @@
+#!/bin/bash
+# Запуск Kimi Proxy (Linux)
+echo "Starting Kimi Proxy on port 8787..."
+exec node "$HOME/.local/bin/kimi-proxy.js"

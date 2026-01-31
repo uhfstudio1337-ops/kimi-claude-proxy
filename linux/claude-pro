@@ -1,0 +1,44 @@
+#!/bin/bash
+# Claude Code Pro — подписка через Smart Proxy v3.0 (Linux)
+# Прозрачный проброс на Anthropic API, без телеметрии
+
+export ANTHROPIC_BASE_URL="http://localhost:8787"
+
+# Находим cli.js
+CLI_PATH="$(npm root -g)/@anthropic-ai/claude-code/cli.js"
+if [ ! -f "$CLI_PATH" ]; then
+    echo "[ОШИБКА] cli.js не найден: $CLI_PATH"
+    echo "Установите: npm install -g @anthropic-ai/claude-code"
+    exit 1
+fi
+
+# ══════════════════════════════════════════════════════════
+# Проверка патча
+# ══════════════════════════════════════════════════════════
+if ! grep -q "localhost:8787" "$CLI_PATH" 2>/dev/null; then
+    echo "══════════════════════════════════════════════════════════"
+    echo " [!] cli.js НЕ пропатчен — автопатч..."
+    echo "══════════════════════════════════════════════════════════"
+    chmod u+w "$CLI_PATH" 2>/dev/null
+    node "$HOME/.local/bin/patch-claude-full.js" "$CLI_PATH"
+    if [ $? -ne 0 ]; then
+        echo "[ОШИБКА] Патч не удался!"
+        exit 1
+    fi
+    chmod a-w "$CLI_PATH"
+    echo "[OK] cli.js пропатчен и защищён"
+    echo "══════════════════════════════════════════════════════════"
+else
+    echo "[OK] cli.js пропатчен"
+fi
+
+# ══════════════════════════════════════════════════════════
+# Проверка прокси
+# ══════════════════════════════════════════════════════════
+if ! curl -s http://localhost:8787/health >/dev/null 2>&1; then
+    echo "[!] Прокси не запущен! Запусти: start-kimi-proxy"
+    exit 1
+fi
+
+echo "[MODE] Anthropic Pro (transparent proxy, no telemetry)"
+exec claude "$@"
