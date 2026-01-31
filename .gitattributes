@@ -1,0 +1,12 @@
+# Windows scripts
+*.cmd text eol=crlf
+
+# Linux scripts
+linux/* text eol=lf
+*.sh text eol=lf
+*.service text eol=lf
+
+# JS/JSON — auto
+*.js text eol=auto
+*.json text eol=auto
+*.md text eol=auto
