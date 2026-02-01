@@ -1,15 +1,24 @@
 #!/bin/bash
-# Claude Code + Kimi K2.5 с автопатчем v2.0 (Linux)
+# Claude Code + Kimi K2.5 с автопатчем v2.1 (Linux)
 # Автоматически проверяет и патчит cli.js при каждом запуске
 
 export ANTHROPIC_BASE_URL="http://localhost:8787"
 export ANTHROPIC_API_KEY="sk-kimi-proxy"
 
-# Находим cli.js
-CLI_PATH="$(npm root -g)/@anthropic-ai/claude-code/cli.js"
+# Находим cli.js (кешируем путь)
+CLI_CACHE="$HOME/.local/bin/.cli_path_cache"
+if [ -f "$CLI_CACHE" ] && [ -f "$(cat "$CLI_CACHE")" ]; then
+    CLI_PATH="$(cat "$CLI_CACHE")"
+else
+    CLI_PATH="$(npm root -g 2>/dev/null)/@anthropic-ai/claude-code/cli.js"
+    if [ -f "$CLI_PATH" ]; then
+        echo "$CLI_PATH" > "$CLI_CACHE"
+    fi
+fi
+
 if [ ! -f "$CLI_PATH" ]; then
     echo "[ОШИБКА] cli.js не найден: $CLI_PATH"
-    echo "Установите: npm install -g @anthropic-ai/claude-code"
+    echo "Установите: sudo npm install -g @anthropic-ai/claude-code"
     exit 1
 fi
 
@@ -21,8 +30,8 @@ if ! grep -q "localhost:8787" "$CLI_PATH" 2>/dev/null; then
     echo " [!] cli.js НЕ пропатчен — автопатч..."
     echo "══════════════════════════════════════════════════════════"
 
-    # Снимаем защиту
-    chmod u+w "$CLI_PATH" 2>/dev/null
+    # Снимаем защиту (cli.js обычно в /usr/lib — нужен sudo)
+    sudo chmod u+w "$CLI_PATH" 2>/dev/null || chmod u+w "$CLI_PATH" 2>/dev/null || true
 
     # Запускаем патчер
     node "$HOME/.local/bin/patch-claude-full.js" "$CLI_PATH"
@@ -32,7 +41,7 @@ if ! grep -q "localhost:8787" "$CLI_PATH" 2>/dev/null; then
     fi
 
     # Защита от перезаписи
-    chmod a-w "$CLI_PATH"
+    sudo chmod a-w "$CLI_PATH" 2>/dev/null || chmod a-w "$CLI_PATH" 2>/dev/null || true
     echo "[OK] cli.js пропатчен и защищён от записи"
     echo "══════════════════════════════════════════════════════════"
 else
@@ -43,8 +52,20 @@ fi
 # Проверка прокси
 # ══════════════════════════════════════════════════════════
 if ! curl -s http://localhost:8787/health >/dev/null 2>&1; then
-    echo "[!] Прокси не запущен! Запусти: start-kimi-proxy"
-    exit 1
+    echo "[!] Прокси не запущен! Запустить автоматически? [Y/n]"
+    read -r answer
+    if [ "$answer" != "n" ] && [ "$answer" != "N" ]; then
+        nohup node "$HOME/.local/bin/kimi-proxy.js" > /tmp/kimi-proxy.log 2>&1 &
+        sleep 1
+        if curl -s http://localhost:8787/health >/dev/null 2>&1; then
+            echo "[OK] Прокси запущен (PID: $!, лог: /tmp/kimi-proxy.log)"
+        else
+            echo "[ОШИБКА] Прокси не удалось запустить. Проверьте /tmp/kimi-proxy.log"
+            exit 1
+        fi
+    else
+        exit 1
+    fi
 fi
 
 # Запуск Claude Code
